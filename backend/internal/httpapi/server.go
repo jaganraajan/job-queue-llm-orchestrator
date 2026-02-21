@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"job-queue-llm-orchestrator/backend/internal/jobs"
@@ -44,11 +45,42 @@ func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleJobs(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
+	switch r.Method {
+	case http.MethodGet:
+		s.handleListJobs(w, r)
+	case http.MethodPost:
+		s.handleCreateJob(w, r)
+	default:
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "Method not allowed")
+	}
+}
+
+func (s *Server) handleListJobs(w http.ResponseWriter, r *http.Request) {
+	query := r.URL.Query()
+	status := strings.TrimSpace(query.Get("status"))
+	tenant := strings.TrimSpace(query.Get("tenant"))
+	model := strings.TrimSpace(query.Get("model"))
+
+	limit := 100
+	if rawLimit := strings.TrimSpace(query.Get("limit")); rawLimit != "" {
+		parsedLimit, err := strconv.Atoi(rawLimit)
+		if err != nil || parsedLimit <= 0 {
+			writeError(w, http.StatusBadRequest, "validation_error", "limit must be a positive integer")
+			return
+		}
+		limit = parsedLimit
+	}
+
+	jobsList, err := s.service.ListJobs(r.Context(), status, tenant, model, limit)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
 	}
 
+	writeJSON(w, http.StatusOK, listJobsResponse{Jobs: jobsList})
+}
+
+func (s *Server) handleCreateJob(w http.ResponseWriter, r *http.Request) {
 	var request createJobRequest
 	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_json", "Request body must be valid JSON")
@@ -129,6 +161,10 @@ type createJobRequest struct {
 type createJobResponse struct {
 	Job              models.Job `json:"job"`
 	IdempotentReplay bool       `json:"idempotent_replay"`
+}
+
+type listJobsResponse struct {
+	Jobs []models.Job `json:"jobs"`
 }
 
 type errorResponse struct {

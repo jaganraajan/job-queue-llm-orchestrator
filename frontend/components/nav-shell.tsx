@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import type { Route } from "next";
 import { usePathname } from "next/navigation";
 
 const links = [
@@ -9,7 +10,7 @@ const links = [
   { href: "/workers", label: "Workers" },
   { href: "/dlq", label: "DLQ" },
   { href: "/settings/tenants", label: "Tenant Limits" }
-];
+] satisfies ReadonlyArray<{ href: Route; label: string }>;
 
 export const NavShell = () => {
   const pathname = usePathname();

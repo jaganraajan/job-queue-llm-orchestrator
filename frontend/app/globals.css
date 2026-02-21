@@ -138,7 +138,8 @@ body {
 
 button,
 input,
-select {
+select,
+textarea {
   font: inherit;
 }
 
@@ -305,6 +306,7 @@ button.danger {
 
 .filters input,
 .filters select,
+.tenant-form textarea,
 .tenant-form input {
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -315,6 +317,7 @@ button.danger {
 
 .filters input:focus,
 .filters select:focus,
+.tenant-form textarea:focus,
 .tenant-form input:focus {
   outline: 2px solid #dedcff;
   outline-offset: 0;

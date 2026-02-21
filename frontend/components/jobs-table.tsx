@@ -11,8 +11,8 @@ export const JobsTable = ({
   onCancel
 }: {
   jobs: Job[];
-  onRetry: (jobId: string) => void;
-  onCancel: (jobId: string) => void;
+  onRetry?: (jobId: string) => void;
+  onCancel?: (jobId: string) => void;
 }) => (
   <div className="table-wrap">
     <table>
@@ -29,6 +29,13 @@ export const JobsTable = ({
         </tr>
       </thead>
       <tbody>
+        {jobs.length === 0 && (
+          <tr>
+            <td colSpan={8}>
+              <p>No jobs found for the selected filters.</p>
+            </td>
+          </tr>
+        )}
         {jobs.map((job) => (
           <tr key={job.id}>
             <td>
@@ -47,14 +54,15 @@ export const JobsTable = ({
             <td>{formatRelativeTime(job.createdAt)}</td>
             <td>
               <div className="table-actions">
-                {(job.status === "failed" || job.status === "retry_scheduled") && (
+                {onRetry && (job.status === "failed" || job.status === "retry_scheduled") && (
                   <button onClick={() => onRetry(job.id)}>Retry</button>
                 )}
-                {(job.status === "queued" || job.status === "running" || job.status === "retry_scheduled") && (
+                {onCancel && (job.status === "queued" || job.status === "running" || job.status === "retry_scheduled") && (
                   <button className="danger" onClick={() => onCancel(job.id)}>
                     Cancel
                   </button>
                 )}
+                {!onRetry && !onCancel && <span className="hint">N/A</span>}
               </div>
             </td>
           </tr>

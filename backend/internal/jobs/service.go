@@ -24,11 +24,6 @@ func NewService(store *store.PostgresStore, queue *queue.RedisQueue, logger *slo
 	}
 }
 
-type JobSnapshot struct {
-	Job           models.Job         `json:"job"`
-	LatestAttempt *models.JobAttempt `json:"latest_attempt,omitempty"`
-}
-
 func (s *Service) CreateJob(ctx context.Context, input models.CreateJobInput) (models.Job, bool, error) {
 	job, existing, err := s.store.CreateJob(ctx, input)
 	if err != nil {
@@ -44,15 +39,19 @@ func (s *Service) CreateJob(ctx context.Context, input models.CreateJobInput) (m
 	return job, existing, nil
 }
 
-func (s *Service) GetJob(ctx context.Context, jobID string) (JobSnapshot, error) {
+func (s *Service) GetJob(ctx context.Context, jobID string) (models.JobSnapshot, error) {
 	job, latestAttempt, err := s.store.GetJobByID(ctx, jobID)
 	if err != nil {
-		return JobSnapshot{}, err
+		return models.JobSnapshot{}, err
 	}
-	return JobSnapshot{
+	return models.JobSnapshot{
 		Job:           job,
 		LatestAttempt: latestAttempt,
 	}, nil
+}
+
+func (s *Service) ListJobs(ctx context.Context, status string, tenantID string, model string, limit int) ([]models.Job, error) {
+	return s.store.ListJobs(ctx, status, tenantID, model, limit)
 }
 
 func (s *Service) Store() *store.PostgresStore {

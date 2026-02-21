@@ -39,4 +39,7 @@ coverage/
 .vercel/
 .eslintcache
 .stylelintcache
+*.tsbuildinfo
 
+### Interview
+interview/

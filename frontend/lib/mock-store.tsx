@@ -99,7 +99,7 @@ export const MockSystemProvider = ({ children }: { children: ReactNode }) => {
 
   const retryJob = (jobId: string) => {
     setState((prev) => {
-      const jobs = prev.jobs.map((job) =>
+      const jobs: Job[] = prev.jobs.map((job): Job =>
         job.id === jobId
           ? {
               ...job,
@@ -129,7 +129,7 @@ export const MockSystemProvider = ({ children }: { children: ReactNode }) => {
 
   const replayDlq = (jobId: string) => {
     setState((prev) => {
-      const jobs = prev.jobs.map((job) =>
+      const jobs: Job[] = prev.jobs.map((job): Job =>
         job.id === jobId
           ? {
               ...job,
@@ -159,7 +159,7 @@ export const MockSystemProvider = ({ children }: { children: ReactNode }) => {
 
   const cancelJob = (jobId: string) => {
     setState((prev) => {
-      const jobs = prev.jobs.map((job) =>
+      const jobs: Job[] = prev.jobs.map((job): Job =>
         job.id === jobId && isActiveStatus(job.status)
           ? {
               ...job,

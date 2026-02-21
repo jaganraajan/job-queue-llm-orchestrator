@@ -48,6 +48,11 @@ type JobAttempt struct {
 	ProviderMeta json.RawMessage `json:"provider_meta,omitempty"`
 }
 
+type JobSnapshot struct {
+	Job           Job         `json:"job"`
+	LatestAttempt *JobAttempt `json:"latest_attempt,omitempty"`
+}
+
 type CreateJobInput struct {
 	TenantID       string
 	Priority       int

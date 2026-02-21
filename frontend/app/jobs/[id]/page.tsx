@@ -1,29 +1,119 @@
 "use client";
 
+import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import { StatusBadge } from "@/components/status-badge";
-import { formatRelativeTime, formatUsd } from "@/lib/format";
-import { useMockSystem } from "@/lib/mock-store";
+import { formatNumber, formatRelativeTime, formatUsd } from "@/lib/format";
+import { getJobSnapshot } from "@/lib/backend-api";
+import { EventRecord, Job } from "@/lib/types";
 
 export default function JobDetailPage() {
   const params = useParams<{ id: string }>();
-  const { state, retryJob, cancelJob } = useMockSystem();
+  const [job, setJob] = useState<Job | null>(null);
+  const [latestAttempt, setLatestAttempt] = useState<{ tokens?: number; cost_usd?: number } | undefined>();
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  const job = state.jobs.find((item) => item.id === params.id);
-  if (!job) {
+  const loadJob = async () => {
+    try {
+      setError(null);
+      const snapshot = await getJobSnapshot(params.id);
+      setJob(snapshot.job);
+      setLatestAttempt(snapshot.latestAttempt);
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : "Failed to load job");
+      setJob(null);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void loadJob();
+    const interval = setInterval(() => {
+      void loadJob();
+    }, 3500);
+
+    return () => clearInterval(interval);
+  }, [params.id]);
+
+  const timelineEvents = useMemo<EventRecord[]>(() => {
+    if (!job) {
+      return [];
+    }
+
+    const events: EventRecord[] = [
+      {
+        id: `${job.id}-created`,
+        type: "job.created",
+        at: job.createdAt,
+        jobId: job.id,
+        details: "Job accepted via POST /v1/jobs"
+      }
+    ];
+
+    if (job.startedAt) {
+      events.push({
+        id: `${job.id}-started`,
+        type: "job.started",
+        at: job.startedAt,
+        jobId: job.id,
+        details: "Worker acquired lease and started execution"
+      });
+    }
+
+    if (job.finishedAt) {
+      const type =
+        job.status === "succeeded"
+          ? "job.succeeded"
+          : job.status === "failed"
+            ? "job.failed"
+            : job.status === "dlq"
+              ? "job.moved_dlq"
+              : "job.failed";
+      events.push({
+        id: `${job.id}-finished`,
+        type,
+        at: job.finishedAt,
+        jobId: job.id,
+        details: job.errorMessage || `Job finished with status ${job.status}`
+      });
+    }
+
+    return events.sort((a, b) => +new Date(b.at) - +new Date(a.at));
+  }, [job]);
+
+  if (loading) {
     return (
       <section className="page">
         <div className="panel">
-          <h3>Job not found</h3>
-          <p className="hint">This mock store does not currently include a job with id {params.id}.</p>
+          <h3>Loading job...</h3>
         </div>
       </section>
     );
   }
 
-  const timelineEvents = state.events
-    .filter((event) => event.jobId === job.id)
-    .sort((a, b) => +new Date(b.at) - +new Date(a.at));
+  if (error) {
+    return (
+      <section className="page">
+        <div className="panel">
+          <h3>Failed to load job</h3>
+          <p className="error">{error}</p>
+        </div>
+      </section>
+    );
+  }
+
+  if (!job) {
+    return (
+      <section className="page">
+        <div className="panel">
+          <h3>Job not found</h3>
+          <p className="hint">No backend job exists with id {params.id}.</p>
+        </div>
+      </section>
+    );
+  }
 
   return (
     <section className="page">
@@ -59,11 +149,11 @@ export default function JobDetailPage() {
             </div>
             <div>
               <dt>Cost</dt>
-              <dd>{formatUsd(job.costUsd)}</dd>
+              <dd>{formatUsd(latestAttempt?.cost_usd ?? job.costUsd)}</dd>
             </div>
             <div>
               <dt>Tokens</dt>
-              <dd>{job.tokens}</dd>
+              <dd>{formatNumber(latestAttempt?.tokens ?? job.tokens)}</dd>
             </div>
             <div>
               <dt>Created</dt>
@@ -76,16 +166,7 @@ export default function JobDetailPage() {
           </dl>
           <p className="hint">Payload summary (redacted): {job.payloadSummary}</p>
           {job.errorMessage && <p className="error">{job.errorCode}: {job.errorMessage}</p>}
-          <div className="actions">
-            {(job.status === "failed" || job.status === "retry_scheduled") && (
-              <button onClick={() => retryJob(job.id)}>Retry Job</button>
-            )}
-            {(job.status === "queued" || job.status === "running" || job.status === "retry_scheduled") && (
-              <button className="danger" onClick={() => cancelJob(job.id)}>
-                Cancel Job
-              </button>
-            )}
-          </div>
+          <p className="hint">Retry/cancel controls will be enabled after those backend endpoints are added.</p>
         </article>
 
         <article className="panel">

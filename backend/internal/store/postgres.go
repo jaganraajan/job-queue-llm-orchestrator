@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	// "time"
+	"strings"
 
 	"job-queue-llm-orchestrator/backend/internal/models"
 
@@ -130,6 +130,86 @@ func (s *PostgresStore) GetJobByID(ctx context.Context, jobID string) (models.Jo
 	}
 
 	return job, &attempt, nil
+}
+
+func (s *PostgresStore) ListJobs(
+	ctx context.Context,
+	status string,
+	tenantID string,
+	model string,
+	limit int,
+) ([]models.Job, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	if limit > 500 {
+		limit = 500
+	}
+
+	baseQuery := `SELECT id, tenant_id, status, priority, model, payload_json, COALESCE(idempotency_key, ''), attempt, max_attempts, created_at, started_at, finished_at, COALESCE(error_code, ''), COALESCE(error_message, ''), trace_id FROM jobs`
+	filters := make([]string, 0, 3)
+	args := make([]any, 0, 4)
+	argPos := 1
+
+	if status != "" {
+		filters = append(filters, fmt.Sprintf("status = $%d", argPos))
+		args = append(args, status)
+		argPos++
+	}
+	if tenantID != "" {
+		filters = append(filters, fmt.Sprintf("tenant_id = $%d", argPos))
+		args = append(args, tenantID)
+		argPos++
+	}
+	if model != "" {
+		filters = append(filters, fmt.Sprintf("model = $%d", argPos))
+		args = append(args, model)
+		argPos++
+	}
+
+	query := baseQuery
+	if len(filters) > 0 {
+		query += " WHERE " + strings.Join(filters, " AND ")
+	}
+	query += fmt.Sprintf(" ORDER BY created_at DESC LIMIT $%d", argPos)
+	args = append(args, limit)
+
+	rows, err := s.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list jobs query: %w", err)
+	}
+	defer rows.Close()
+
+	jobs := make([]models.Job, 0, limit)
+	for rows.Next() {
+		var job models.Job
+		if err := rows.Scan(
+			&job.ID,
+			&job.TenantID,
+			&job.Status,
+			&job.Priority,
+			&job.Model,
+			&job.PayloadJSON,
+			&job.IdempotencyKey,
+			&job.Attempt,
+			&job.MaxAttempts,
+			&job.CreatedAt,
+			&job.StartedAt,
+			&job.FinishedAt,
+			&job.ErrorCode,
+			&job.ErrorMessage,
+			&job.TraceID,
+		); err != nil {
+			return nil, fmt.Errorf("list jobs scan: %w", err)
+		}
+		jobs = append(jobs, job)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list jobs rows: %w", err)
+	}
+
+	return jobs, nil
 }
 
 func (s *PostgresStore) MarkJobRunning(ctx context.Context, jobID string, workerID string) (models.Job, bool, error) {
