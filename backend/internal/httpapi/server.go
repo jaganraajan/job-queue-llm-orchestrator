@@ -34,6 +34,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/healthz", s.handleHealthz)
 	s.mux.HandleFunc("/v1/jobs", s.handleJobs)
 	s.mux.HandleFunc("/v1/jobs/", s.handleJobByID)
+	s.mux.HandleFunc("/v1/admin/jobs/", s.handleAdminJobs)
 }
 
 func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {
@@ -124,18 +125,31 @@ func (s *Server) handleCreateJob(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleJobByID(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "Method not allowed")
-		return
-	}
-
-	jobID := strings.TrimPrefix(r.URL.Path, "/v1/jobs/")
-	jobID = strings.TrimSpace(jobID)
-	if jobID == "" || strings.Contains(jobID, "/") {
+	jobID, action, ok := parsePathTail(r.URL.Path, "/v1/jobs/")
+	if !ok {
 		writeError(w, http.StatusNotFound, "not_found", "Job not found")
 		return
 	}
 
+	if action == "" && r.Method == http.MethodGet {
+		s.handleGetJobByID(w, r, jobID)
+		return
+	}
+
+	if action == "cancel" && r.Method == http.MethodPost {
+		s.handleCancelJob(w, r, jobID)
+		return
+	}
+
+	if action != "" && action != "cancel" {
+		writeError(w, http.StatusNotFound, "not_found", "Job not found")
+		return
+	}
+
+	writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "Method not allowed")
+}
+
+func (s *Server) handleGetJobByID(w http.ResponseWriter, r *http.Request, jobID string) {
 	snapshot, err := s.service.GetJob(r.Context(), jobID)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
@@ -147,6 +161,51 @@ func (s *Server) handleJobByID(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, snapshot)
+}
+
+func (s *Server) handleCancelJob(w http.ResponseWriter, r *http.Request, jobID string) {
+	job, err := s.service.CancelJob(r.Context(), jobID)
+	if err != nil {
+		switch {
+		case errors.Is(err, store.ErrNotFound):
+			writeError(w, http.StatusNotFound, "not_found", "Job not found")
+		case errors.Is(err, store.ErrInvalidStateTransition):
+			writeError(w, http.StatusConflict, "invalid_state", "Job cannot be cancelled from its current status")
+		default:
+			writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
+		}
+		return
+	}
+
+	writeJSON(w, http.StatusOK, actionJobResponse{Job: job})
+}
+
+func (s *Server) handleAdminJobs(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "Method not allowed")
+		return
+	}
+
+	jobID, action, ok := parsePathTail(r.URL.Path, "/v1/admin/jobs/")
+	if !ok || action != "retry" {
+		writeError(w, http.StatusNotFound, "not_found", "Job not found")
+		return
+	}
+
+	job, err := s.service.RetryJob(r.Context(), jobID)
+	if err != nil {
+		switch {
+		case errors.Is(err, store.ErrNotFound):
+			writeError(w, http.StatusNotFound, "not_found", "Job not found")
+		case errors.Is(err, store.ErrInvalidStateTransition):
+			writeError(w, http.StatusConflict, "invalid_state", "Job cannot be retried from its current status")
+		default:
+			writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
+		}
+		return
+	}
+
+	writeJSON(w, http.StatusOK, actionJobResponse{Job: job})
 }
 
 type createJobRequest struct {
@@ -161,6 +220,10 @@ type createJobRequest struct {
 type createJobResponse struct {
 	Job              models.Job `json:"job"`
 	IdempotentReplay bool       `json:"idempotent_replay"`
+}
+
+type actionJobResponse struct {
+	Job models.Job `json:"job"`
 }
 
 type listJobsResponse struct {
@@ -183,4 +246,28 @@ func writeError(w http.ResponseWriter, statusCode int, code string, message stri
 		Code:    code,
 		Message: message,
 	})
+}
+
+func parsePathTail(path string, prefix string) (id string, action string, ok bool) {
+	tail := strings.TrimPrefix(path, prefix)
+	tail = strings.TrimSpace(strings.Trim(tail, "/"))
+	if tail == "" {
+		return "", "", false
+	}
+
+	parts := strings.Split(tail, "/")
+	if len(parts) > 2 {
+		return "", "", false
+	}
+	id = strings.TrimSpace(parts[0])
+	if id == "" {
+		return "", "", false
+	}
+	if len(parts) == 2 {
+		action = strings.TrimSpace(parts[1])
+		if action == "" {
+			return "", "", false
+		}
+	}
+	return id, action, true
 }

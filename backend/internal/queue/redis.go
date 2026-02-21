@@ -41,6 +41,10 @@ func (q *RedisQueue) EnqueueJob(ctx context.Context, jobID string) error {
 	return q.client.LPush(ctx, q.readyKey, jobID).Err()
 }
 
+func (q *RedisQueue) RemoveQueuedJob(ctx context.Context, jobID string) error {
+	return q.client.LRem(ctx, q.readyKey, 0, jobID).Err()
+}
+
 func (q *RedisQueue) DequeueJob(ctx context.Context, timeout time.Duration) (string, error) {
 	result, err := q.client.BRPop(ctx, timeout, q.readyKey).Result()
 	if errors.Is(err, redis.Nil) {

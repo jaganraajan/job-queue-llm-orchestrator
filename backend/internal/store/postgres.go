@@ -15,6 +15,7 @@ import (
 )
 
 var ErrNotFound = errors.New("not found")
+var ErrInvalidStateTransition = errors.New("invalid state transition")
 
 type PostgresStore struct {
 	pool *pgxpool.Pool
@@ -210,6 +211,143 @@ func (s *PostgresStore) ListJobs(
 	}
 
 	return jobs, nil
+}
+
+func (s *PostgresStore) CancelJob(ctx context.Context, jobID string, reason string) (models.Job, error) {
+	if strings.TrimSpace(reason) == "" {
+		reason = "Cancelled by operator"
+	}
+
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return models.Job{}, fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+
+	job := models.Job{}
+	err = tx.QueryRow(
+		ctx,
+		`UPDATE jobs
+		 SET status = 'cancelled',
+		     finished_at = now(),
+		     error_code = 'CANCELLED',
+		     error_message = $2
+		 WHERE id = $1 AND status IN ('queued', 'running', 'retry_scheduled')
+		 RETURNING id, tenant_id, status, priority, model, payload_json, COALESCE(idempotency_key, ''), attempt, max_attempts, created_at, started_at, finished_at, COALESCE(error_code, ''), COALESCE(error_message, ''), trace_id`,
+		jobID,
+		reason,
+	).Scan(
+		&job.ID,
+		&job.TenantID,
+		&job.Status,
+		&job.Priority,
+		&job.Model,
+		&job.PayloadJSON,
+		&job.IdempotencyKey,
+		&job.Attempt,
+		&job.MaxAttempts,
+		&job.CreatedAt,
+		&job.StartedAt,
+		&job.FinishedAt,
+		&job.ErrorCode,
+		&job.ErrorMessage,
+		&job.TraceID,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		exists, existsErr := jobExistsTx(ctx, tx, jobID)
+		if existsErr != nil {
+			return models.Job{}, existsErr
+		}
+		if !exists {
+			return models.Job{}, ErrNotFound
+		}
+		return models.Job{}, ErrInvalidStateTransition
+	}
+	if err != nil {
+		return models.Job{}, fmt.Errorf("update cancel job: %w", err)
+	}
+
+	if _, err := tx.Exec(
+		ctx,
+		`UPDATE job_attempts
+		 SET finished_at = now(), success = false, error_code = 'CANCELLED', error_message = $2
+		 WHERE job_id = $1 AND finished_at IS NULL`,
+		jobID,
+		reason,
+	); err != nil {
+		return models.Job{}, fmt.Errorf("mark attempt cancelled: %w", err)
+	}
+
+	if err := appendEventTx(ctx, tx, "job.failed", &jobID, nil, reason); err != nil {
+		return models.Job{}, err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return models.Job{}, fmt.Errorf("commit cancel job: %w", err)
+	}
+
+	return job, nil
+}
+
+func (s *PostgresStore) RetryJob(ctx context.Context, jobID string) (models.Job, error) {
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return models.Job{}, fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+
+	job := models.Job{}
+	err = tx.QueryRow(
+		ctx,
+		`UPDATE jobs
+		 SET status = 'queued',
+		     started_at = null,
+		     finished_at = null,
+		     error_code = null,
+		     error_message = null
+		 WHERE id = $1 AND status IN ('failed', 'cancelled', 'dlq', 'retry_scheduled', 'queued')
+		 RETURNING id, tenant_id, status, priority, model, payload_json, COALESCE(idempotency_key, ''), attempt, max_attempts, created_at, started_at, finished_at, COALESCE(error_code, ''), COALESCE(error_message, ''), trace_id`,
+		jobID,
+	).Scan(
+		&job.ID,
+		&job.TenantID,
+		&job.Status,
+		&job.Priority,
+		&job.Model,
+		&job.PayloadJSON,
+		&job.IdempotencyKey,
+		&job.Attempt,
+		&job.MaxAttempts,
+		&job.CreatedAt,
+		&job.StartedAt,
+		&job.FinishedAt,
+		&job.ErrorCode,
+		&job.ErrorMessage,
+		&job.TraceID,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		exists, existsErr := jobExistsTx(ctx, tx, jobID)
+		if existsErr != nil {
+			return models.Job{}, existsErr
+		}
+		if !exists {
+			return models.Job{}, ErrNotFound
+		}
+		return models.Job{}, ErrInvalidStateTransition
+	}
+	if err != nil {
+		return models.Job{}, fmt.Errorf("update retry job: %w", err)
+	}
+
+	if err := appendEventTx(ctx, tx, "job.retry_scheduled", &jobID, nil, "Manual retry requested"); err != nil {
+		return models.Job{}, err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return models.Job{}, fmt.Errorf("commit retry job: %w", err)
+	}
+
+	return job, nil
 }
 
 func (s *PostgresStore) MarkJobRunning(ctx context.Context, jobID string, workerID string) (models.Job, bool, error) {
@@ -550,4 +688,12 @@ func appendEventTx(
 		return fmt.Errorf("insert event tx: %w", err)
 	}
 	return nil
+}
+
+func jobExistsTx(ctx context.Context, tx pgx.Tx, jobID string) (bool, error) {
+	var exists bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM jobs WHERE id = $1)`, jobID).Scan(&exists); err != nil {
+		return false, fmt.Errorf("check job exists: %w", err)
+	}
+	return exists, nil
 }

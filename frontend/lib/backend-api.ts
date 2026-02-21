@@ -188,3 +188,23 @@ export const getJobSnapshot = async (
     latestAttempt: body.latest_attempt
   };
 };
+
+export const cancelJob = async (jobId: string): Promise<Job> => {
+  const response = await fetch(`/api/v1/jobs/${jobId}/cancel`, {
+    method: "POST"
+  });
+  await ensureOk(response);
+
+  const body = (await response.json()) as { job: BackendJob };
+  return mapBackendJob(body.job);
+};
+
+export const retryJob = async (jobId: string): Promise<Job> => {
+  const response = await fetch(`/api/v1/admin/jobs/${jobId}/retry`, {
+    method: "POST"
+  });
+  await ensureOk(response);
+
+  const body = (await response.json()) as { job: BackendJob };
+  return mapBackendJob(body.job);
+};

@@ -54,7 +54,11 @@ export const JobsTable = ({
             <td>{formatRelativeTime(job.createdAt)}</td>
             <td>
               <div className="table-actions">
-                {onRetry && (job.status === "failed" || job.status === "retry_scheduled") && (
+                {onRetry &&
+                  (job.status === "failed" ||
+                    job.status === "retry_scheduled" ||
+                    job.status === "cancelled" ||
+                    job.status === "dlq") && (
                   <button onClick={() => onRetry(job.id)}>Retry</button>
                 )}
                 {onCancel && (job.status === "queued" || job.status === "running" || job.status === "retry_scheduled") && (

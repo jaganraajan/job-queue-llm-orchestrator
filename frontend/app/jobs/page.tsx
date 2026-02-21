@@ -2,7 +2,7 @@
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { JobsTable } from "@/components/jobs-table";
-import { createJob, listJobs } from "@/lib/backend-api";
+import { cancelJob, createJob, listJobs, retryJob } from "@/lib/backend-api";
 import { Job } from "@/lib/types";
 
 export default function JobsPage() {
@@ -13,6 +13,7 @@ export default function JobsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  const [actionBusy, setActionBusy] = useState(false);
   const [createForm, setCreateForm] = useState({
     tenantId: "acme",
     model: "gpt-4.1-mini",
@@ -97,11 +98,37 @@ export default function JobsPage() {
     }
   };
 
+  const handleRetryJob = async (jobId: string) => {
+    setActionBusy(true);
+    try {
+      setError(null);
+      await retryJob(jobId);
+      await refreshJobs();
+    } catch (retryError) {
+      setError(retryError instanceof Error ? retryError.message : "Failed to retry job");
+    } finally {
+      setActionBusy(false);
+    }
+  };
+
+  const handleCancelJob = async (jobId: string) => {
+    setActionBusy(true);
+    try {
+      setError(null);
+      await cancelJob(jobId);
+      await refreshJobs();
+    } catch (cancelError) {
+      setError(cancelError instanceof Error ? cancelError.message : "Failed to cancel job");
+    } finally {
+      setActionBusy(false);
+    }
+  };
+
   return (
     <section className="page">
       <div className="page-title">
         <h2>Jobs</h2>
-        <button onClick={() => void refreshJobs()} disabled={creating}>
+        <button onClick={() => void refreshJobs()} disabled={creating || actionBusy}>
           Refresh
         </button>
       </div>
@@ -201,7 +228,13 @@ export default function JobsPage() {
         </div>
       )}
 
-      <JobsTable jobs={filteredJobs} />
+      {actionBusy && (
+        <div className="panel">
+          <p className="hint">Applying job action...</p>
+        </div>
+      )}
+
+      <JobsTable jobs={filteredJobs} onRetry={handleRetryJob} onCancel={handleCancelJob} />
     </section>
   );
 }

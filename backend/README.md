@@ -2,7 +2,13 @@
 
 This folder contains the first backend slice:
 
-- API service: `GET /v1/jobs`, `POST /v1/jobs`, `GET /v1/jobs/{id}`, `GET /healthz`
+- API service:
+  - `GET /v1/jobs`
+  - `POST /v1/jobs`
+  - `GET /v1/jobs/{id}`
+  - `POST /v1/jobs/{id}/cancel`
+  - `POST /v1/admin/jobs/{id}/retry`
+  - `GET /healthz`
 - Redis ready queue + lease key support
 - Worker process that dequeues and executes jobs
 - Postgres persistence for jobs, attempts, worker heartbeats, events

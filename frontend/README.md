@@ -1,6 +1,6 @@
 # Job Queue LLM Orchestrator - Frontend
 
-This Next.js UI now uses the Go backend for job creation and job reads.
+This Next.js UI now uses the Go backend for job create/read/retry/cancel flows.
 
 ## Implemented routes
 
@@ -17,6 +17,8 @@ This Next.js UI now uses the Go backend for job creation and job reads.
   - `GET /api/v1/jobs` -> backend `GET /v1/jobs`
   - `POST /api/v1/jobs` -> backend `POST /v1/jobs`
   - `GET /api/v1/jobs/:id` -> backend `GET /v1/jobs/:id`
+  - `POST /api/v1/jobs/:id/cancel` -> backend `POST /v1/jobs/:id/cancel`
+  - `POST /api/v1/admin/jobs/:id/retry` -> backend `POST /v1/admin/jobs/:id/retry`
 - Other pages still use mock in-memory state until corresponding backend endpoints are implemented.
 
 Backend URL defaults to `http://localhost:8080` and can be changed with:

@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import { StatusBadge } from "@/components/status-badge";
 import { formatNumber, formatRelativeTime, formatUsd } from "@/lib/format";
-import { getJobSnapshot } from "@/lib/backend-api";
+import { cancelJob, getJobSnapshot, retryJob } from "@/lib/backend-api";
 import { EventRecord, Job } from "@/lib/types";
 
 export default function JobDetailPage() {
@@ -13,6 +13,7 @@ export default function JobDetailPage() {
   const [latestAttempt, setLatestAttempt] = useState<{ tokens?: number; cost_usd?: number } | undefined>();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [actionBusy, setActionBusy] = useState(false);
 
   const loadJob = async () => {
     try {
@@ -36,6 +37,40 @@ export default function JobDetailPage() {
 
     return () => clearInterval(interval);
   }, [params.id]);
+
+  const handleRetryJob = async () => {
+    if (!job) {
+      return;
+    }
+
+    setActionBusy(true);
+    try {
+      setError(null);
+      await retryJob(job.id);
+      await loadJob();
+    } catch (retryError) {
+      setError(retryError instanceof Error ? retryError.message : "Failed to retry job");
+    } finally {
+      setActionBusy(false);
+    }
+  };
+
+  const handleCancelJob = async () => {
+    if (!job) {
+      return;
+    }
+
+    setActionBusy(true);
+    try {
+      setError(null);
+      await cancelJob(job.id);
+      await loadJob();
+    } catch (cancelError) {
+      setError(cancelError instanceof Error ? cancelError.message : "Failed to cancel job");
+    } finally {
+      setActionBusy(false);
+    }
+  };
 
   const timelineEvents = useMemo<EventRecord[]>(() => {
     if (!job) {
@@ -166,7 +201,19 @@ export default function JobDetailPage() {
           </dl>
           <p className="hint">Payload summary (redacted): {job.payloadSummary}</p>
           {job.errorMessage && <p className="error">{job.errorCode}: {job.errorMessage}</p>}
-          <p className="hint">Retry/cancel controls will be enabled after those backend endpoints are added.</p>
+          <div className="actions">
+            {(job.status === "failed" || job.status === "retry_scheduled" || job.status === "cancelled" || job.status === "dlq") && (
+              <button onClick={() => void handleRetryJob()} disabled={actionBusy}>
+                Retry Job
+              </button>
+            )}
+            {(job.status === "queued" || job.status === "running" || job.status === "retry_scheduled") && (
+              <button className="danger" onClick={() => void handleCancelJob()} disabled={actionBusy}>
+                Cancel Job
+              </button>
+            )}
+          </div>
+          {actionBusy && <p className="hint">Applying action...</p>}
         </article>
 
         <article className="panel">
